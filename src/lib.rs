@@ -27,31 +27,34 @@ impl From<secp256k1::Error> for Error {fn from(error: secp256k1::Error) -> Self 
 #[derive(Clone, Debug, Hash, Ord, Eq, PartialOrd, PartialEq)]
 #[derive(serde_with::SerializeDisplay)]
 #[derive(serde_with::DeserializeFromStr)]
-pub struct OrangeName(PublicKey);
-impl std::fmt::Display for OrangeName {
+pub struct Name(PublicKey);
+impl std::fmt::Display for Name {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "orange_name:{}", self.0)
     }
 }
-impl std::str::FromStr for OrangeName {
+impl std::str::FromStr for Name {
     type Err = secp256k1::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let split = s.split(":").collect::<Vec<_>>();
         if split.len() != 2 || split[0] != "orange_name" {return Err(secp256k1::Error::InvalidPublicKey);}
-        Ok(OrangeName(PublicKey::from_str(split[1])?))
+        Ok(Name(PublicKey::from_str(split[1])?))
     }
 }
 
+#[derive(Serialize, Deserialize, PartialOrd, PartialEq, Debug, Clone, Hash, Ord, Eq)]
+pub struct Endpoint(pub OrangeName, pub Url);
+
 #[derive(Serialize, Deserialize, PartialOrd, PartialEq, Clone, Debug, Hash, Ord, Eq)]
-pub enum OrangeSignature {
+pub enum Signature {
     Temporary(Signature)
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Clone, Debug, Eq)]
-pub enum OrangeSecret {
+pub enum Secret {
     Temporary(SecretKey)
 }
-impl OrangeSecret {
+impl Secret {
     pub fn new() -> Self {Self::Temporary(SecretKey::easy_new())}
     pub fn name(&self) -> OrangeName { 
         match self {
@@ -62,13 +65,7 @@ impl OrangeSecret {
 }
 impl Default for OrangeSecret {fn default() -> Self {Self::new()}}
 
-#[derive(Serialize, Deserialize, PartialOrd, PartialEq, Clone, Hash, Ord, Eq)]
-pub struct Endpoint(pub OrangeName, pub Url);
-impl std::fmt::Debug for Endpoint {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Endpoint({:?}, {})", self.0, self.1)
-    }
-}
+
 
 #[derive(Default, Debug)]
 pub struct OrangeResolver;
