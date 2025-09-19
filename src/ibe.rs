@@ -1,8 +1,6 @@
-use bls12_381::{G1Projective, G1Affine, G2Projective, G2Affine, Gt, Scalar, Bls12};
+use bls12_381::{G1Projective, G2Projective, Gt, Scalar};
 use group::{Group, Curve};
-use ff::Field;
-use rand::{Rng, RngCore};
-use std::ops::Neg;
+use rand::{Rng};
 
 fn pairing(g1: &G1Projective, g2: &G2Projective) -> Gt {
     bls12_381::pairing(&g1.to_affine(), &g2.to_affine())
@@ -332,53 +330,145 @@ fn get_scalar(rng: &mut impl Rng) -> Scalar {
   //}
  
 
-#[test]
-fn main_test() {
+//  #[test]
+//  fn main_test() {
 
-  //let mut rng = rand::rng();
+//    //let mut rng = rand::rng();
 
-  //let g1 = G1Projective::generator();
-  //let g2 = G2Projective::generator();
-  //let gt = pairing(&g1, &g2);
+//    //let g1 = G1Projective::generator();
+//    //let g2 = G2Projective::generator();
+//    //let gt = pairing(&g1, &g2);
 
-  //let x = get_scalar(&mut rng);
-  //let gtx = pairing(&(g1*x), &g2);
-  //assert_eq!(gt*x, gtx);
+//    //let x = get_scalar(&mut rng);
+//    //let gtx = pairing(&(g1*x), &g2);
+//    //assert_eq!(gt*x, gtx);
 
 
-    //Setup
+//      //Setup
+//      let mut rng = rand::rng();
+//      let a = get_scalar(&mut rng);
+//      let p = G1Projective::generator();
+//      let g = G2Projective::generator();
+//      let g1 = g*a;
+//      let pa = p*a;
+//      let h = vec![get_scalar(&mut rng), get_scalar(&mut rng), get_scalar(&mut rng)];
+
+//      let g2 = g*get_scalar(&mut rng);
+//      let master_key = g2*a;
+
+//      let F = |j: usize, x: Scalar| (g1*x) * h[j];
+
+//      //KeyGen
+//      let id = vec![get_scalar(&mut rng), get_scalar(&mut rng)];
+
+//      let r = vec![get_scalar(&mut rng), get_scalar(&mut rng)];
+
+//      let d_id = (master_key + ((F(0, id[0]) * r[0]) + (F(1, id[1]) * r[1])), vec![p*r[0], p*r[1]]);
+
+//      //Encrypt
+//      let M = Gt::generator()*get_scalar(&mut rng);
+//      let s = get_scalar(&mut rng);
+//      let egg = pairing(&pa, &g2);
+//      let A = (egg*s)+M;
+//      let B = p*s;
+//      let C = vec![F(0, id[0])*s, F(1, id[1])*s];
+
+//      //Decrypt
+//      let ecd = pairing(&d_id.1[0], &C[0]) + pairing(&d_id.1[1], &C[1]);
+
+//      let bd0 = pairing(&B, &d_id.0);
+//      let dm = A+(ecd + -bd0);
+//      assert_eq!(M, dm);
+//  }
+
+struct Params {
+    p: G1Projective,
+    h: G2Projective,
+    egg: Gt
+}
+
+type MasterKey = G2Projective;
+
+fn setup() -> (Params, MasterKey) {
     let mut rng = rand::rng();
     let a = get_scalar(&mut rng);
     let p = G1Projective::generator();
     let g = G2Projective::generator();
     let g1 = g*a;
     let pa = p*a;
-    let h = vec![get_scalar(&mut rng), get_scalar(&mut rng), get_scalar(&mut rng)];
+    let h = g1*get_scalar(&mut rng);
 
     let g2 = g*get_scalar(&mut rng);
     let master_key = g2*a;
 
-    let F = |j: usize, x: Scalar| (g1*x) * h[j];
+    let egg = pairing(&pa, &g2);
+    (Params{p, h, egg}, master_key)
+}
+
+type Key = (G2Projective, Vec<G1Projective>);
+
+//(MasterKey, vec![]) for root
+
+fn keygen(params: &Params, key: &Key, id: &[Scalar]) -> Key {
+    let mut rng = rand::rng();
+    let r = (0..id.len()).map(|_| get_scalar(&mut rng)).collect::<Vec<_>>();
+    let d0 = (0..id.len()).fold(key.0.clone(), |key, x| key + (params.h * id[x]) * r[x]);
+    let dk = (0..id.len()).map(|x| params.p*r[x]).collect();
+    (d0, [key.1.clone(), dk].concat())
+}
+
+type C = (Gt, G1Projective, Vec<G2Projective>);
+
+fn encrypt(params: &Params, id: &[Scalar], m: Gt) -> C {
+    let mut rng = rand::rng();
+    let s = get_scalar(&mut rng);
+    let a = (params.egg*s)+m;
+    let b = params.p*s;
+    let c = (0..id.len()).map(|x| (params.h*id[x])*s).collect();
+    (a, b, c)
+}
+
+fn decrypt(key: &Key, c: &C) -> Gt {
+    let (a, b, c) = c;
+    let ecd = c.iter().enumerate().fold(Gt::identity(), |gt, (x, cx)|
+        gt + pairing(&key.1[x], &cx)
+    );
+
+    let bd0 = pairing(&b, &key.0);
+    a+(ecd + -bd0)
+}
+
+pub fn main_test2() {
+    let mut rng = rand::rng();
+
+
+    //Setup
+    let (params, key) = setup();
+    let id1 = get_scalar(&mut rng);
+    let id2 = get_scalar(&mut rng);
+    let id3 = get_scalar(&mut rng);
 
     //KeyGen
-    let id = vec![get_scalar(&mut rng), get_scalar(&mut rng)];
+    let key1 = keygen(&params, &(key, vec![]), &[id1]);
+    let key2 = keygen(&params, &key1, &[id2]);
+    let key3 = keygen(&params, &key2, &[id3]);
 
-    let r = vec![get_scalar(&mut rng), get_scalar(&mut rng)];
-
-    let d_id = (master_key + ((F(0, id[0]) * r[0]) + (F(1, id[1]) * r[1])), vec![p*r[0], p*r[1]]);
+    let keyf = keygen(&params, &(key, vec![]), &[id1, id2, id3]);
 
     //Encrypt
-    let M = Gt::generator()*get_scalar(&mut rng);
-    let s = get_scalar(&mut rng);
-    let egg = pairing(&pa, &g2);
-    let A = (egg*s)+M;
-    let B = p*s;
-    let C = vec![F(0, id[0])*s, F(1, id[1])*s];
+    let m = Gt::generator()*get_scalar(&mut rng);
+    let c = encrypt(&params, &[id1, id2, id3], m);
 
     //Decrypt
-    let ecd = pairing(&d_id.1[0], &C[0]) + pairing(&d_id.1[1], &C[1]);
+    let dm = decrypt(&key3, &c);
+    let dm_ = decrypt(&keyf, &c);
 
-    let bd0 = pairing(&B, &d_id.0);
-    let dm = A+(ecd + -bd0);
-    assert_eq!(M, dm);
+    assert_eq!(m, dm);
+    assert_eq!(m, dm_);
+}
+
+
+#[test]
+fn testt() {
+    main_test2();
 }

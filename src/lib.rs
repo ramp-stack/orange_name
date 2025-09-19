@@ -8,7 +8,7 @@ use std::fmt::Debug;
 use serde::{Serialize, Deserialize};
 use url::Url;
 
-mod ibe;
+pub mod ibe;
 
 type DateTime = chrono::DateTime<chrono::Utc>;
 
