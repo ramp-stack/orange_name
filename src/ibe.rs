@@ -146,8 +146,10 @@ fn get_scalar(rng: &mut impl Rng) -> Scalar {
 #[derive(Clone)]
 pub struct PublicParams {
     p: G1Projective,     // Generator in G1
+    q: G2Affine,         // Generator in G2
     q_alpha: G2Projective, // q ^ alpha in G2
-    h: G2Projective,
+    h_vec: Vec<G2Projective>, // h1 to h_l in G2
+    egg: Gt              // e(p, q_alpha)
 }
 
 // Define the master key structure
@@ -181,20 +183,20 @@ pub fn setup(max_depth: usize) -> (PublicParams, MasterKey) {
     let alpha = get_scalar(&mut rng);
     let q_alpha = q * alpha;
 
-    let h = q*get_scalar(&mut rng);
-  //let mut h_vec = Vec::with_capacity(max_depth);
-  //for _ in 0..max_depth {
-  //    let gamma = get_scalar(&mut rng);
-  //    h_vec.push(q * gamma);
-  //}
+    let mut h_vec = Vec::with_capacity(max_depth);
+    for _ in 0..max_depth {
+        let gamma = get_scalar(&mut rng);
+        h_vec.push(q * gamma);
+    }
 
-    //let egg = pairing(&p.to_affine(), &q_alpha.to_affine());
+    let egg = pairing(&p.to_affine(), &q_alpha.to_affine());
 
     let params = PublicParams {
         p,
-        //q: q.to_affine(),
+        q: q.to_affine(),
         q_alpha,
-        h,
+        h_vec,
+        egg,
     };
     let master_key = MasterKey { alpha };
 
@@ -205,13 +207,14 @@ pub fn setup(max_depth: usize) -> (PublicParams, MasterKey) {
 pub fn keygen(params: &PublicParams, master_key: &MasterKey, id: &[Scalar]) -> PrivateKey {
     let mut rng = rand::thread_rng();
     let j = id.len();
+    assert!(j <= params.h_vec.len(), "Identity depth exceeds maximum");
 
     let mut d0 = params.q_alpha;
     let mut d = Vec::with_capacity(j);
 
     for k in 0..j {
         let rk = get_scalar(&mut rng);
-        let fk = params.q_alpha * id[k] + params.h;
+        let fk = params.q_alpha * id[k] + params.h_vec[k];
         d0 = d0 + (fk * rk);
         d.push(params.p * rk);
     }
@@ -223,9 +226,10 @@ pub fn keygen(params: &PublicParams, master_key: &MasterKey, id: &[Scalar]) -> P
 pub fn derive_child(params: &PublicParams, parent_key: &PrivateKey, child_id_component: Scalar) -> PrivateKey {
     let mut rng = rand::thread_rng();
     let parent_depth = parent_key.d.len();
+    assert!(parent_depth + 1 <= params.h_vec.len(), "Exceeded maximum depth");
 
     let rk = get_scalar(&mut rng);
-    let fk = params.q_alpha * child_id_component + params.h;
+    let fk = params.q_alpha * child_id_component + params.h_vec[parent_depth];
     let new_d0 = parent_key.d0 + (fk * rk);
 
     let mut new_d = parent_key.d.clone();
@@ -238,16 +242,17 @@ pub fn derive_child(params: &PublicParams, parent_key: &PrivateKey, child_id_com
 pub fn encrypt(params: &PublicParams, id: &[Scalar], message: Gt) -> Ciphertext {
     let mut rng = rand::thread_rng();
     let j = id.len();
+    assert!(j <= params.h_vec.len(), "Identity depth exceeds maximum");
 
     let s = get_scalar(&mut rng);
 
-    let a = pairing(&params.p.to_affine(), &params.q_alpha.to_affine()) * s + message;
+    let a = params.egg * s + message;
 
     let b = params.p * s;
 
     let mut c = Vec::with_capacity(j);
     for k in 0..j {
-        let fk = params.q_alpha * id[k] + params.h;
+        let fk = params.q_alpha * id[k] + params.h_vec[k];
         c.push(fk * s);
     }
 
