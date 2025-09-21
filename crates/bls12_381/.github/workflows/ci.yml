@@ -1,0 +1,86 @@
+name: CI checks
+
+on: [push, pull_request]
+
+jobs:
+  test-msrv:
+    name: Test MSRV on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macOS-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        run: cargo test --verbose --release --features experimental,zeroize
+      - name: Verify working directory is clean
+        run: git diff --exit-code
+
+  test-latest:
+    name: Test latest on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macOS-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        id: toolchain
+      - run: rustup override set ${{steps.toolchain.outputs.name}}
+      - name: Remove lockfile to build with latest dependencies
+        run: rm Cargo.lock
+      - name: Run tests
+        run: cargo test --verbose --release --features experimental,zeroize
+      - name: Verify working directory is clean (excluding lockfile)
+        run: git diff --exit-code ':!Cargo.lock'
+
+  no-std:
+    name: Check no-std target ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - thumbv6m-none-eabi
+          - wasm32-unknown-unknown
+          - wasm32-wasi
+
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup target add ${{ matrix.target }}
+      - run: cargo fetch
+      - name: Build
+        run: >
+          cargo build
+          --verbose
+          --target ${{ matrix.target }}
+          --no-default-features
+          --features groups,pairings
+
+  bitrot:
+    name: Bitrot check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Build benchmarks and all-features to prevent bitrot
+      - name: Build benchmarks
+        run: cargo build --benches --examples --all-features
+
+  doc-links:
+    name: Intra-doc links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo fetch
+      # Requires #![deny(rustdoc::broken_intra_doc_links)] in crate.
+      - name: Check intra-doc links
+        run: cargo doc --document-private-items
+
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check formatting
+        run: cargo fmt -- --check
