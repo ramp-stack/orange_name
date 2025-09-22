@@ -25,6 +25,25 @@ use pairing::MultiMillerLoop;
 #[derive(Copy, Clone, Debug)]
 pub struct MillerLoopResult(pub(crate) Fp12);
 
+impl fmt::Display for MillerLoopResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", [
+            self.0.c0.c0.c0.0,
+            self.0.c0.c0.c1.0,
+            self.0.c0.c1.c0.0,
+            self.0.c0.c1.c1.0,
+            self.0.c0.c2.c0.0,
+            self.0.c0.c2.c1.0,
+            self.0.c1.c0.c0.0,
+            self.0.c1.c0.c1.0,
+            self.0.c1.c1.c0.0,
+            self.0.c1.c1.c1.0,
+            self.0.c1.c2.c0.0,
+            self.0.c1.c2.c1.0,
+        ])
+    }
+}
+
 impl Default for MillerLoopResult {
     fn default() -> Self {
         MillerLoopResult(Fp12::one())
@@ -41,6 +60,63 @@ impl ConditionallySelectable for MillerLoopResult {
 }
 
 impl MillerLoopResult {
+
+    /// Gt to a byte array
+    pub fn to_byte_array(&self) -> [u8; 576] {
+        [
+            self.0.c0.c0.c0.0,
+            self.0.c0.c0.c1.0,
+            self.0.c0.c1.c0.0,
+            self.0.c0.c1.c1.0,
+            self.0.c0.c2.c0.0,
+            self.0.c0.c2.c1.0,
+            self.0.c1.c0.c0.0,
+            self.0.c1.c0.c1.0,
+            self.0.c1.c1.c0.0,
+            self.0.c1.c1.c1.0,
+            self.0.c1.c2.c0.0,
+            self.0.c1.c2.c1.0,
+        ].concat().into_iter().flat_map(|a| a.to_be_bytes().to_vec()).collect::<Vec<_>>().try_into().unwrap()
+    }
+
+    /// Gt from a byte array
+    pub fn from_byte_array(b: [u8; 576]) -> Self {
+        let c = |b: &[u8; 576], i: usize| -> [u64; 6] {
+            let i = i*48;
+            (0..6).map(|l| u64::from_be_bytes(b[i+(l*8)..i+(l*8)+8].try_into().unwrap())).collect::<Vec<_>>().try_into().unwrap()
+        };
+        MillerLoopResult(Fp12{
+            c0: Fp6{
+                c0: Fp2{
+                    c0: Fp(c(&b, 0)),
+                    c1: Fp(c(&b, 1))
+                },
+                c1: Fp2{
+                    c0: Fp(c(&b, 2)),
+                    c1: Fp(c(&b, 3))
+                },
+                c2: Fp2{
+                    c0: Fp(c(&b, 4)),
+                    c1: Fp(c(&b, 5))
+                },
+            },
+            c1: Fp6{
+                c0: Fp2{
+                    c0: Fp(c(&b, 6)),
+                    c1: Fp(c(&b, 7))
+                },
+                c1: Fp2{
+                    c0: Fp(c(&b, 8)),
+                    c1: Fp(c(&b, 9))
+                },
+                c2: Fp2{
+                    c0: Fp(c(&b, 10)),
+                    c1: Fp(c(&b, 11))
+                }
+            }
+        })
+    }
+
     /// This performs a "final exponentiation" routine to convert the result
     /// of a Miller loop into an element of `Gt` with help of efficient squaring
     /// operation in the so-called `cyclotomic subgroup` of `Fq6` so that
@@ -221,7 +297,20 @@ impl zeroize::DefaultIsZeroes for Gt {}
 
 impl fmt::Display for Gt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{:?}", [
+            self.0.c0.c0.c0.0,
+            self.0.c0.c0.c1.0,
+            self.0.c0.c1.c0.0,
+            self.0.c0.c1.c1.0,
+            self.0.c0.c2.c0.0,
+            self.0.c0.c2.c1.0,
+            self.0.c1.c0.c0.0,
+            self.0.c1.c0.c1.0,
+            self.0.c1.c1.c0.0,
+            self.0.c1.c1.c1.0,
+            self.0.c1.c2.c0.0,
+            self.0.c1.c2.c1.0,
+        ])
     }
 }
 
@@ -255,6 +344,54 @@ impl Gt {
     pub fn double(&self) -> Gt {
         Gt(self.0.square())
     }
+
+  ///// Serialize Gt point as compressed
+  //pub fn serialize_compressed(&self) -> [u8; 48] {
+  //    [
+  //        self.0.c0.c0.c0.0,
+  //        self.0.c0.c0.c1.0,
+
+  //        self.0.c0.c1.c0.0,
+  //        self.0.c0.c1.c1.0,
+  //    ].concat().into_iter().flat_map(|a| a.to_be_bytes().to_vec()).collect::<Vec<_>>().try_into().unwrap()
+  //}
+
+  //pub fn deserialize_compressed(b: [u8; 48]) -> Self {
+  //    let c = |b: &[u8; 48], i: usize| -> [u64; 6] {
+  //        let i = i*48;
+  //        (0..6).map(|l| u64::from_be_bytes(b[i+(l*8)..i+(l*8)+8].try_into().unwrap())).collect::<Vec<_>>().try_into().unwrap()
+  //    };
+  //    Gt(Fp12{
+  //        c0: Fp6{
+  //            c0: Fp2{
+  //                c0: Fp(c(&b, 0)),
+  //                c1: Fp(c(&b, 1))
+  //            },
+  //            c1: Fp2{
+  //                c0: Fp(c(&b, 2)),
+  //                c1: Fp(c(&b, 3))
+  //            },
+  //            c2: Fp2{
+  //                c0: Fp(c(&b, 4)),
+  //                c1: Fp(c(&b, 5))
+  //            },
+  //        },
+  //        c1: Fp6{
+  //            c0: Fp2{
+  //                c0: Fp(c(&b, 6)),
+  //                c1: Fp(c(&b, 7))
+  //            },
+  //            c1: Fp2{
+  //                c0: Fp(c(&b, 8)),
+  //                c1: Fp(c(&b, 9))
+  //            },
+  //            c2: Fp2{
+  //                c0: Fp(c(&b, 10)),
+  //                c1: Fp(c(&b, 11))
+  //            }
+  //        }
+  //    })
+  //}
 
     /// Gt to a byte array
     pub fn to_byte_array(&self) -> [u8; 576] {

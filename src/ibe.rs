@@ -10,7 +10,7 @@ use secp256k1::rand::Rng;
 
 use chacha20_poly1305::{ChaCha20Poly1305, Nonce, Key as ChaChaKey};
 
-use bls12_381::{G1Projective, G2Projective, G1Affine, G2Affine, Gt, Scalar, pairing};
+use bls12_381::{G1Projective, G2Projective, G1Affine, G2Affine, G2Prepared, Gt, Scalar, pairing};
 use group::{Group, Curve, GroupEncoding};
 use std::ops::Deref;
 
@@ -44,8 +44,7 @@ fn get_scalar<R: Rng + ?Sized>(rng: &mut R) -> Scalar {loop {
 
 #[derive(Clone, Copy, Debug)]
 pub struct MasterPub {
-    p: G1Affine,
-    g1_h: G2Affine,
+    g1_h: G1Affine,
     egg: Gt
 }
 
@@ -56,7 +55,14 @@ impl MasterPub {
 
         let s = get_scalar(rng);
         let a = (self.egg*s)+m;
-        let b = (self.p*s).to_affine();
+
+        //panic!("gt: {a}");
+
+      //let v = a.serialize_compressed();
+      //let aa = Gt::deserialize_compressed(&v);
+      //assert_eq!(a, aa);
+
+        let b = (G2Projective::generator()*s).to_affine();
         let c = (0..id.len()).map(|x| ((self.g1_h*id[x])*s).to_affine()).collect();
         let cipher = Cipher{a, b, c};
 
@@ -84,22 +90,22 @@ impl MasterKey {
         let h = get_scalar(rng);
 
         //Precompute MasterPub
-        let p = G1Projective::generator();
-        let g = G2Projective::generator();
+        let p = G2Projective::generator();
+        let g = G1Projective::generator();
         let g1 = g*a;
         let pa = p*a;
         let g1_h = (g1*h).to_affine();
 
         let g2 = g*g2s;
-        let egg = pairing(&pa.to_affine(), &g2.to_affine());
+        let egg = pairing(&g2.to_affine(), &pa.to_affine());
 
         MasterKey{
             h, g2s, a,
             key: Key{
-                d0: ((G2Projective::generator()*g2s)*a).to_affine(),
+                d0: ((G1Projective::generator()*g2s)*a).to_affine(),
                 dx: vec![]
             },
-            master_pub: MasterPub{p: p.to_affine(), g1_h, egg}
+            master_pub: MasterPub{g1_h, egg}
         }
     } 
 
@@ -108,8 +114,8 @@ impl MasterKey {
 impl Deref for MasterKey {type Target = Key; fn deref(&self) -> &Key {&self.key}}
 
 pub struct Key {
-    d0: G2Affine,
-    dx: Vec<G1Affine>
+    d0: G1Affine,
+    dx: Vec<G2Prepared>
 }
 impl Key {
     fn derive<R: Rng + ?Sized>(&self, rng: &mut R, master_pub: &MasterPub, id: &[Scalar]) -> Key {
@@ -117,23 +123,23 @@ impl Key {
         let d0 = (0..id.len()).fold(self.d0, |key, x|
             (key + (master_pub.g1_h * id[x]) * r[x]).to_affine()
         );
-        let dk = (0..id.len()).map(|x| (master_pub.p*r[x]).to_affine()).collect();
+        let dk = (0..id.len()).map(|x| G2Prepared::from((G2Projective::generator()*r[x]).to_affine())).collect();
         Key{d0, dx: [self.dx.clone(), dk].concat()}
     }
 
     fn decrypt(&self, p: &[u8]) -> Result<Vec<u8>, Error> {
         let Cipher{a, b, c} = Cipher::from_slice(p)?;
-        let ecd = c.iter().enumerate().fold(Gt::identity(), |gt, (x, cx)|
-            gt + pairing(&self.dx[x], cx)
-        );
+        let ecd = bls12_381::multi_miller_loop(
+            c.iter().zip(self.dx.iter()).collect::<Vec<_>>().as_slice()
+        ).final_exponentiation();
 
-        let bd0 = pairing(&b, &self.d0);
+        let bd0 = pairing(&self.d0, &b);
         let m = a+(ecd + -bd0);
 
         let shared = HIBEHash::hash(&m.to_byte_array());
         let key = ChaChaKey::new(*shared.as_ref());
 
-        let cipher_size = 8+576+48+(c.len()*96);
+        let cipher_size = 8+576+96+(c.len()*48);
         let tag: [u8; 16] = p[cipher_size..cipher_size+16].try_into()?;
         let mut payload = p[cipher_size+16..].to_vec();
 
@@ -145,11 +151,11 @@ impl Key {
 #[derive(Debug, PartialEq)]
 pub struct Cipher {
     a: Gt,
-    b: G1Affine,
-    c: Vec<G2Affine>
+    b: G2Affine,
+    c: Vec<G1Affine>
 }
 impl Cipher {
-    ///Vector is 8+576+48+(id_depth*96)
+    ///Vector is 8+576+96+(id_depth*48)
     fn to_vec(&self) -> Vec<u8> {
         [
             (self.c.len() as u64).to_be_bytes().to_vec(),
@@ -163,9 +169,9 @@ impl Cipher {
         let c_len = u64::from_be_bytes(slice[0..8].try_into()?) as usize;
         Ok(Cipher{
             a: Gt::from_byte_array(slice[8..8+576].try_into()?),
-            b: G1Affine::from_compressed(slice[8+576..8+576+48].try_into()?).unwrap(),
-            c: (0..c_len).map(|i| Ok(G2Affine::from_compressed(
-                slice[8+576+48+(i*96)..8+576+48+(i*96)+96].try_into()?
+            b: G2Affine::from_compressed(slice[8+576..8+576+96].try_into()?).unwrap(),
+            c: (0..c_len).map(|i| Ok(G1Affine::from_compressed(
+                slice[8+576+96+(i*48)..8+576+96+(i*48)+48].try_into()?
             ).unwrap())).collect::<Result<_, TryFromSliceError>>()?
         })
     }
@@ -192,11 +198,14 @@ pub fn main_test2() {
     //Encrypt
     let m = vec![29, 49, 47];
     let c = master_pub.encrypt(&mut rng, &[id1, id2, id3], m.clone());
+    let cm = master_pub.encrypt(&mut rng, &[], m.clone());
 
     //Decrypt
     let dm = key3.decrypt(&c).unwrap();
     let dm_ = keyf.decrypt(&c).unwrap();
+    let dmm = master_key.decrypt(&cm).unwrap();
 
     assert_eq!(m, dm);
     assert_eq!(m, dm_);
+    assert_eq!(m, dmm);
 }
