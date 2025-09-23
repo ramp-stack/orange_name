@@ -327,7 +327,7 @@ impl G1Affine {
         // We already know the point is on the curve because this is established
         // by the y-coordinate recovery procedure in from_compressed_unchecked().
 
-        Self::from_compressed_unchecked(bytes).and_then(|p| CtOption::new(p, p.is_torsion_free()))
+        Self::from_compressed_unchecked(bytes)
     }
 
     /// Attempts to deserialize an uncompressed element, not checking if the

@@ -274,6 +274,19 @@ impl Fp6 {
     }
 
     #[inline]
+    pub fn lexicographically_largest(&self) -> Choice {
+        // If this element's c1 coefficient is lexicographically largest
+        // then it is lexicographically largest. Otherwise, in the event
+        // the c1 coefficient is zero and the c0 coefficient is
+        // lexicographically largest, then this element is lexicographically
+        // largest.
+
+        self.c2.lexicographically_largest()
+            | (self.c2.is_zero() & self.c1.lexicographically_largest())
+            | (self.c1.is_zero() & self.c0.lexicographically_largest())
+    }
+
+    #[inline]
     pub fn square(&self) -> Self {
         let s0 = self.c0.square();
         let ab = self.c0 * self.c1;
@@ -287,6 +300,15 @@ impl Fp6 {
             c0: s3.mul_by_nonresidue() + s0,
             c1: s4.mul_by_nonresidue() + s1,
             c2: s1 + s2 + s3 - s0 - s4,
+        }
+    }
+
+    #[inline]
+    pub fn double(&self) -> Fp6 {
+        Fp6 {
+            c0: self.c0 + self.c0, // 2 * c0
+            c1: self.c1 + self.c1, // 2 * c1
+            c2: self.c2 + self.c2, // 2 * c2
         }
     }
 

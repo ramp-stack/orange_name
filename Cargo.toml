@@ -4,11 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+ark-bls12-381 = "0.5.0"
+ark-ec = "0.5.0"
+ark-ff = "0.5.0"
+ark-serialize = "0.5.0"
+bitcoin = "0.32.7"
 bitcoin_hashes = "0.16.0"
-bls12_381 = {path="./crates/bls12_381"}
 chacha20-poly1305 = "0.1.2"
 chrono = "0.4.41"
-group = "0.13.0"
 secp256k1 = { version = "0.31.1", features = ["serde", "global-context", "rand"] }
 serde = {version = "1.0.219", features = ["derive"]}
 serde_with = "3.14.0"

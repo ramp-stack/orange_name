@@ -11,7 +11,13 @@ use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use group::Group;
 use pairing::{Engine, PairingCurveAffine};
 use rand_core::RngCore;
-use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
+use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption};
+
+const V: Fp6 = Fp6 {
+    c0: Fp2::zero(),
+    c1: Fp2 { c0: Fp::one(), c1: Fp::zero() },
+    c2: Fp2::zero(),
+};
 
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
@@ -345,107 +351,61 @@ impl Gt {
         Gt(self.0.square())
     }
 
-  ///// Serialize Gt point as compressed
-  //pub fn serialize_compressed(&self) -> [u8; 48] {
-  //    [
-  //        self.0.c0.c0.c0.0,
-  //        self.0.c0.c0.c1.0,
-
-  //        self.0.c0.c1.c0.0,
-  //        self.0.c0.c1.c1.0,
-  //    ].concat().into_iter().flat_map(|a| a.to_be_bytes().to_vec()).collect::<Vec<_>>().try_into().unwrap()
-  //}
-
-  //pub fn deserialize_compressed(b: [u8; 48]) -> Self {
-  //    let c = |b: &[u8; 48], i: usize| -> [u64; 6] {
-  //        let i = i*48;
-  //        (0..6).map(|l| u64::from_be_bytes(b[i+(l*8)..i+(l*8)+8].try_into().unwrap())).collect::<Vec<_>>().try_into().unwrap()
-  //    };
-  //    Gt(Fp12{
-  //        c0: Fp6{
-  //            c0: Fp2{
-  //                c0: Fp(c(&b, 0)),
-  //                c1: Fp(c(&b, 1))
-  //            },
-  //            c1: Fp2{
-  //                c0: Fp(c(&b, 2)),
-  //                c1: Fp(c(&b, 3))
-  //            },
-  //            c2: Fp2{
-  //                c0: Fp(c(&b, 4)),
-  //                c1: Fp(c(&b, 5))
-  //            },
-  //        },
-  //        c1: Fp6{
-  //            c0: Fp2{
-  //                c0: Fp(c(&b, 6)),
-  //                c1: Fp(c(&b, 7))
-  //            },
-  //            c1: Fp2{
-  //                c0: Fp(c(&b, 8)),
-  //                c1: Fp(c(&b, 9))
-  //            },
-  //            c2: Fp2{
-  //                c0: Fp(c(&b, 10)),
-  //                c1: Fp(c(&b, 11))
-  //            }
-  //        }
-  //    })
-  //}
-
-    /// Gt to a byte array
-    pub fn to_byte_array(&self) -> [u8; 576] {
-        [
-            self.0.c0.c0.c0.0,
-            self.0.c0.c0.c1.0,
-            self.0.c0.c1.c0.0,
-            self.0.c0.c1.c1.0,
-            self.0.c0.c2.c0.0,
-            self.0.c0.c2.c1.0,
-            self.0.c1.c0.c0.0,
-            self.0.c1.c0.c1.0,
-            self.0.c1.c1.c0.0,
-            self.0.c1.c1.c1.0,
-            self.0.c1.c2.c0.0,
-            self.0.c1.c2.c1.0,
-        ].concat().into_iter().flat_map(|a| a.to_be_bytes().to_vec()).collect::<Vec<_>>().try_into().unwrap()
+    /// Compress
+    pub fn to_compressed(&self) -> [u8; 288] {
+        let infinity = bool::from(self.0.c1.is_zero()) as u8;
+        let c0 = (Fp6::one() + self.0.c0) * self.0.c1.invert().unwrap();
+        let mut b: [u8; 288] = [
+            c0.c0.c0.to_bytes(),
+            c0.c0.c1.to_bytes(),
+            c0.c1.c0.to_bytes(),
+            c0.c1.c1.to_bytes(),
+            c0.c2.c0.to_bytes(),
+            c0.c2.c1.to_bytes(),
+        ].concat().try_into().unwrap();
+        b[0] |= 1u8 << 7;
+        b[0] |= infinity << 6;
+        b
     }
 
-    /// Gt from a byte array
-    pub fn from_byte_array(b: [u8; 576]) -> Self {
-        let c = |b: &[u8; 576], i: usize| -> [u64; 6] {
-            let i = i*48;
-            (0..6).map(|l| u64::from_be_bytes(b[i+(l*8)..i+(l*8)+8].try_into().unwrap())).collect::<Vec<_>>().try_into().unwrap()
-        };
-        Gt(Fp12{
-            c0: Fp6{
-                c0: Fp2{
-                    c0: Fp(c(&b, 0)),
-                    c1: Fp(c(&b, 1))
-                },
-                c1: Fp2{
-                    c0: Fp(c(&b, 2)),
-                    c1: Fp(c(&b, 3))
-                },
-                c2: Fp2{
-                    c0: Fp(c(&b, 4)),
-                    c1: Fp(c(&b, 5))
-                },
-            },
-            c1: Fp6{
-                c0: Fp2{
-                    c0: Fp(c(&b, 6)),
-                    c1: Fp(c(&b, 7))
-                },
-                c1: Fp2{
-                    c0: Fp(c(&b, 8)),
-                    c1: Fp(c(&b, 9))
-                },
-                c2: Fp2{
-                    c0: Fp(c(&b, 10)),
-                    c1: Fp(c(&b, 11))
+    /// Decompress an Fp6 element back to Gt.
+    /// Assumes the input is a valid compression of a cyclotomic element.
+    /// Panics if denominator is zero (invalid input).
+    pub fn from_compressed(mut b: [u8; 288]) -> CtOption<Gt> {
+        let sign = ((b[0] >> 7) & 1) == 1;
+        let infinity = Choice::from((b[0] >> 6) & 1);
+        b[0] &= 0b0011_1111;
+
+        Fp::from_bytes(&b[0..48].try_into().unwrap()).and_then(|f0| 
+            Fp::from_bytes(&b[48..96].try_into().unwrap()).and_then(|f1|
+                Fp::from_bytes(&b[96..144].try_into().unwrap()).and_then(|f2|
+                    Fp::from_bytes(&b[144..192].try_into().unwrap()).and_then(|f3|
+                        Fp::from_bytes(&b[192..240].try_into().unwrap()).and_then(|f4|
+                            Fp::from_bytes(&b[240..288].try_into().unwrap()).map(|f5|
+                                Fp6{
+                                    c0: Fp2{c0: f0, c1: f1},
+                                    c1: Fp2{c0: f2, c1: f3},
+                                    c2: Fp2{c0: f4, c1: f5}
+                                }
+                            )
+                        )
+                    )
+                )
+            )
+        ).map(|beta| {
+            Gt(if bool::from(infinity & beta.is_zero()) {
+                Fp12{c0: beta, c1: Fp6::one()}
+            } else {
+                let beta_square = beta.square();
+                let denom = beta_square - V;
+                let inv_denom = denom.invert().expect("Invalid beta: denominator zero");
+                let c0 = (beta_square + V) * inv_denom;
+                let mut c1 = beta.double() * inv_denom;
+                if !sign {
+                    c1 = -c1;
                 }
-            }
+                Fp12 { c0, c1 }
+            })
         })
     }
 }
