@@ -19,6 +19,21 @@ const V: Fp6 = Fp6 {
     c2: Fp2::zero(),
 };
 
+const _B: Fp = Fp::from_raw_unchecked([
+    0xaa27_0000_000c_fff3,
+    0x53cc_0032_fc34_000a,
+    0x478f_e97a_6b0a_807f,
+    0xb1d3_7ebe_e6ba_24d7,
+    0x8ec9_733b_bf78_ab2f,
+    0x09d6_4551_3d83_de7e,
+]);
+
+const B: Fp6 = Fp6 {
+    c0: Fp2 { c0: _B, c1: _B },
+    c1: Fp2 { c0: _B, c1: _B },
+    c2: Fp2 { c0: _B, c1: _B },
+};
+
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 #[cfg(feature = "alloc")]
@@ -290,7 +305,7 @@ impl<'b> AddAssign<&'b MillerLoopResult> for MillerLoopResult {
 /// keep code and abstractions consistent.
 #[cfg_attr(docsrs, doc(cfg(feature = "pairings")))]
 #[derive(Copy, Clone, Debug)]
-pub struct Gt(pub(crate) Fp12);
+pub struct Gt(pub Fp12);
 
 impl Default for Gt {
     fn default() -> Self {
@@ -351,6 +366,103 @@ impl Gt {
         Gt(self.0.square())
     }
 
+    /// he
+    pub fn from_byte_array(b: [u8; 576]) -> Self {
+        let c = |b: &[u8; 576], i: usize| -> [u64; 6] {
+            let i = i*48;
+            (0..6).map(|l| u64::from_be_bytes(b[i+(l*8)..i+(l*8)+8].try_into().unwrap())).collect::<Vec<_>>().try_into().unwrap()
+        };
+        Gt(Fp12{
+            c0: Fp6{
+                c0: Fp2{
+                    c0: Fp(c(&b, 0)),
+                    c1: Fp(c(&b, 1))
+                },
+                c1: Fp2{
+                    c0: Fp(c(&b, 2)),
+                    c1: Fp(c(&b, 3))
+                },
+                c2: Fp2{
+                    c0: Fp(c(&b, 4)),
+                    c1: Fp(c(&b, 5))
+                },
+            },
+            c1: Fp6{
+                c0: Fp2{
+                    c0: Fp(c(&b, 6)),
+                    c1: Fp(c(&b, 7))
+                },
+                c1: Fp2{
+                    c0: Fp(c(&b, 8)),
+                    c1: Fp(c(&b, 9))
+                },
+                c2: Fp2{
+                    c0: Fp(c(&b, 10)),
+                    c1: Fp(c(&b, 11))
+                }
+            }
+        })
+    }
+
+  ///// Compress
+  //pub fn to_compressed(&self) -> [u8; 288] {
+  //    //let sign = bool::from(self.0.c0.lexicographically_largest());
+  //    let infinity = bool::from(self.0.c1.is_zero()) as u8;
+  //    let c0 = (Fp6::one() + self.0.c0) * self.0.c1.invert().unwrap();
+  //    let mut b: [u8; 288] = [
+  //        c0.c0.c0.to_bytes(),
+  //        c0.c0.c1.to_bytes(),
+  //        c0.c1.c0.to_bytes(),
+  //        c0.c1.c1.to_bytes(),
+  //        c0.c2.c0.to_bytes(),
+  //        c0.c2.c1.to_bytes(),
+  //    ].concat().try_into().unwrap();
+  //    b[0] |= 1u8 << 7;
+  //    b[0] |= infinity << 6;
+  //    b
+  //}
+
+  ///// Decompress an Fp6 element back to Gt.
+  ///// Assumes the input is a valid compression of a cyclotomic element.
+  ///// Panics if denominator is zero (invalid input).
+  //pub fn from_compressed(mut b: [u8; 288]) -> CtOption<Gt> {
+  //    let sign = ((b[0] >> 7) & 1) == 1;
+  //    let infinity = Choice::from((b[0] >> 6) & 1);
+  //    b[0] &= 0b0011_1111;
+
+  //    Fp::from_bytes(&b[0..48].try_into().unwrap()).and_then(|f0| 
+  //        Fp::from_bytes(&b[48..96].try_into().unwrap()).and_then(|f1|
+  //            Fp::from_bytes(&b[96..144].try_into().unwrap()).and_then(|f2|
+  //                Fp::from_bytes(&b[144..192].try_into().unwrap()).and_then(|f3|
+  //                    Fp::from_bytes(&b[192..240].try_into().unwrap()).and_then(|f4|
+  //                        Fp::from_bytes(&b[240..288].try_into().unwrap()).map(|f5|
+  //                            Fp6{
+  //                                c0: Fp2{c0: f0, c1: f1},
+  //                                c1: Fp2{c0: f2, c1: f3},
+  //                                c2: Fp2{c0: f4, c1: f5}
+  //                            }
+  //                        )
+  //                    )
+  //                )
+  //            )
+  //        )
+  //    ).map(|beta| {
+  //        Gt(if bool::from(infinity & beta.is_zero()) {
+  //            Fp12{c0: beta, c1: Fp6::one()}
+  //        } else {
+  //            let beta_square = beta.square();
+  //            let denom = beta_square - V;
+  //            let inv_denom = denom.invert().expect("Invalid beta: denominator zero");
+  //            let c0 = (beta_square + V) * inv_denom;
+  //            let mut c1 = beta.double() * inv_denom;
+  //            if !sign {
+  //                c1 = -c1;
+  //            }
+  //            Fp12 { c0, c1 }
+  //        })
+  //    })
+  //}
+
     /// Compress
     pub fn to_compressed(&self) -> [u8; 288] {
         let infinity = bool::from(self.0.c1.is_zero()) as u8;
@@ -363,8 +475,7 @@ impl Gt {
             c0.c2.c0.to_bytes(),
             c0.c2.c1.to_bytes(),
         ].concat().try_into().unwrap();
-        b[0] |= 1u8 << 7;
-        b[0] |= infinity << 6;
+        b[0] |= infinity << 7;
         b
     }
 
@@ -372,9 +483,8 @@ impl Gt {
     /// Assumes the input is a valid compression of a cyclotomic element.
     /// Panics if denominator is zero (invalid input).
     pub fn from_compressed(mut b: [u8; 288]) -> CtOption<Gt> {
-        let sign = ((b[0] >> 7) & 1) == 1;
-        let infinity = Choice::from((b[0] >> 6) & 1);
-        b[0] &= 0b0011_1111;
+        let infinity = Choice::from((b[0] >> 7) & 1);
+        b[0] &= 0b0111_1111;
 
         Fp::from_bytes(&b[0..48].try_into().unwrap()).and_then(|f0| 
             Fp::from_bytes(&b[48..96].try_into().unwrap()).and_then(|f1|
@@ -400,10 +510,7 @@ impl Gt {
                 let denom = beta_square - V;
                 let inv_denom = denom.invert().expect("Invalid beta: denominator zero");
                 let c0 = (beta_square + V) * inv_denom;
-                let mut c1 = beta.double() * inv_denom;
-                if !sign {
-                    c1 = -c1;
-                }
+                let c1 = (beta.double() * inv_denom);
                 Fp12 { c0, c1 }
             })
         })

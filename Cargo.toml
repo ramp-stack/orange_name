@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bls12_381 = {path="./crates/bls12_381"}
 ark-bls12-381 = "0.5.0"
 ark-ec = "0.5.0"
 ark-ff = "0.5.0"
@@ -16,3 +17,4 @@ secp256k1 = { version = "0.31.1", features = ["serde", "global-context", "rand"]
 serde = {version = "1.0.219", features = ["derive"]}
 serde_with = "3.14.0"
 url = "2.5.7"
+group = "0.13.0"
